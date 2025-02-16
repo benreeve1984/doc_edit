@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GPT Text Transformer</title>
+  <style>
+    body {
+      margin: 20px;
+      font-family: sans-serif;
+    }
+    textarea {
+      width: 100%;
+      height: 200px;
+    }
+    #instructionInput {
+      width: 80%;
+    }
+    .button {
+      padding: 8px 12px;
+      margin: 5px 0;
+      cursor: pointer;
+    }
+    #result {
+      margin-top: 20px;
+      white-space: pre-wrap; /* preserve line breaks */
+      background: #f9f9f9;
+      border: 1px solid #ccc;
+      padding: 10px;
+    }
+    .highlight {
+      background-color: #fff3cd;
+      transition: background-color 0.3s;
+    }
+    
+    .controls {
+      margin: 10px 0;
+    }
+    
+    .edit-controls {
+      display: none;  /* Hidden by default */
+      margin-top: 10px;
+    }
+    
+    .edit-controls button {
+      margin-right: 10px;
+    }
+    
+    .accept-button {
+      background-color: #28a745;
+      color: white;
+      border: none;
+    }
+    
+    .reject-button {
+      background-color: #dc3545;
+      color: white;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>GPT Text Transformer</h1>
+
+  <p>Paste or type text below, or load a Markdown file (.md) to transform:</p>
+  
+  <textarea id="inputText" placeholder="Type or paste your text here..."></textarea>
+  
+  <p>
+    <label for="fileLoader">Load Markdown File:</label>
+    <input type="file" id="fileLoader" accept=".md">
+  </p>
+  
+  <br/>
+  <div class="controls">
+    <div class="custom-transform">
+      <label for="instructionInput">Custom Instruction:</label>
+      <input type="text" id="instructionInput" placeholder="e.g. 'Expand bullet points'">
+      <button class="button" id="transformButton">Transform Selected Text</button>
+    </div>
+    <div class="style-guide">
+      <button class="button" id="styleGuideButton">Apply Style Guide</button>
+    </div>
+  </div>
+  
+  <div id="result"></div>
+  
+  <div class="edit-controls" id="editControls">
+    <button class="button accept-button" id="acceptButton">Accept Changes</button>
+    <button class="button reject-button" id="rejectButton">Reject Changes</button>
+  </div>
+  
+  <script>
+    // Obtain references to HTML elements
+    const textarea = document.getElementById('inputText');
+    const instructionInput = document.getElementById('instructionInput');
+    const transformButton = document.getElementById('transformButton');
+    const fileLoader = document.getElementById('fileLoader');
+    const resultDiv = document.getElementById('result');
+    const editControls = document.getElementById('editControls');
+    const acceptButton = document.getElementById('acceptButton');
+    const rejectButton = document.getElementById('rejectButton');
+
+    // Listen for changes on the file input element to load a .md file's content
+    fileLoader.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+
+      // Guard clause: Ensure a file is selected
+      if (!file) {
+        return;
+      }
+
+      // (Optional) Validate that the selected file has a .md extension
+      if (!file.name.endsWith('.md')) {
+        alert('Please select a Markdown (.md) file.');
+        return;
+      }
+
+      // Create a FileReader instance to read the chosen file
+      const reader = new FileReader();
+
+      // Define what happens once the file is read successfully
+      reader.onload = (e) => {
+        // Set the file's text content into the textarea
+        textarea.value = e.target.result;
+      };
+
+      // Error handling: Log error and alert user if reading fails
+      reader.onerror = (e) => {
+        console.error("Error reading file", e);
+        alert('Error reading file.');
+      };
+
+      // Read the file as plain text
+      reader.readAsText(file);
+    });
+
+    // Store original text for potential reversion
+    let originalText = '';
+    let originalStart = 0;
+    let originalEnd = 0;
+
+    // Function to highlight changed characters
+    function highlightChanges(text, diffIndices, start) {
+      const chars = text.split('');
+      diffIndices.forEach(diff => {
+        const index = diff.index - start;  // Adjust for selection start
+        if (index >= 0 && index < chars.length) {
+          chars[index] = `<span class="highlight">${chars[index]}</span>`;
+        }
+      });
+      return chars.join('');
+    }
+
+    // Function to handle text transformation
+    async function transformText(instruction, useStyleGuide = false) {
+      const { selectionStart, selectionEnd, value } = textarea;
+      if (selectionStart === selectionEnd) {
+        alert('Please select some text in the textarea first.');
+        return;
+      }
+
+      // Store original text and positions for potential reversion
+      originalText = value.substring(selectionStart, selectionEnd);
+      originalStart = selectionStart;
+      originalEnd = selectionEnd;
+      
+      const selectedText = originalText;
+      const payload = {
+        text: selectedText,
+        instruction: instruction,
+        use_style_guide: useStyleGuide
+      };
+
+      try {
+        const response = await fetch('/transform', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        if (data.error) {
+          resultDiv.textContent = `Error: ${data.error}`;
+          return;
+        }
+
+        // Create a temporary div to handle HTML content
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = highlightChanges(data.edited_text, data.diff_indices, 0);
+        
+        // Replace the selected text with highlighted version
+        const before = value.substring(0, selectionStart);
+        const after = value.substring(selectionEnd);
+        textarea.value = before + tempDiv.textContent + after;
+        
+        // Show edit controls
+        editControls.style.display = 'block';
+
+        // Show transformation details
+        let resultText = 'Transformation applied successfully:\n\n';
+        if (data.explanation) {
+          resultText += `Changes made: ${data.explanation}\n\n`;
+        }
+        if (data.style_changes?.length > 0) {
+          resultText += 'Style changes applied:\n';
+          data.style_changes.forEach(change => {
+            resultText += `- ${change}\n`;
+          });
+        }
+        resultDiv.textContent = resultText;
+
+      } catch (err) {
+        console.error(err);
+        resultDiv.textContent = 'An error occurred. See console for details.';
+      }
+    }
+
+    // Listen for custom transformation button clicks
+    transformButton.addEventListener('click', async () => {
+      const instruction = instructionInput.value.trim();
+      if (!instruction) {
+        alert('Please enter an instruction for GPT.');
+        return;
+      }
+      await transformText(instruction, false);
+    });
+
+    // Add listener for the style guide button
+    const styleGuideButton = document.getElementById('styleGuideButton');
+    styleGuideButton.addEventListener('click', async () => {
+      await transformText('', true);
+    });
+
+    // Handle accepting changes
+    acceptButton.addEventListener('click', () => {
+      // Remove highlights but keep the changes
+      const { value } = textarea;
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = value;
+      
+      // Remove highlight spans
+      const highlights = tempDiv.querySelectorAll('.highlight');
+      highlights.forEach(highlight => {
+        highlight.replaceWith(highlight.textContent);
+      });
+      
+      textarea.value = tempDiv.textContent;
+      editControls.style.display = 'none';
+      resultDiv.textContent = 'Changes accepted.';
+    });
+
+    // Handle rejecting changes
+    rejectButton.addEventListener('click', () => {
+      // Revert to original text
+      const { value } = textarea;
+      const before = value.substring(0, originalStart);
+      const after = value.substring(originalEnd);
+      textarea.value = before + originalText + after;
+      
+      editControls.style.display = 'none';
+      resultDiv.textContent = 'Changes rejected.';
+    });
+  </script>
+
+</body>
+</html>
