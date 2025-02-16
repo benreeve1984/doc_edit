@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <title>Model Document Auto-Editor</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/simplemde/latest/simplemde.min.css">
+  <script src="https://cdn.jsdelivr.net/simplemde/latest/simplemde.min.js"></script>
   <style>
     :root {
         --notion-white: #ffffff;
@@ -255,6 +257,85 @@
         flex-direction: column;
         gap: 6px;
     }
+
+    /* Style the editor */
+    .CodeMirror {
+        height: calc(100vh - 40px);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+        font-size: 16px;
+        line-height: 1.5;
+        background: var(--notion-white);
+        border: none;
+        box-shadow: rgba(15, 15, 15, 0.05) 0px 0px 0px 1px, 
+                    rgba(15, 15, 15, 0.1) 0px 3px 6px, 
+                    rgba(15, 15, 15, 0.2) 0px 9px 24px;
+    }
+
+    /* Hide the toolbar except for preview toggle */
+    .editor-toolbar button {
+        display: none;
+    }
+    
+    .editor-toolbar button.preview {
+        display: inline-block;
+    }
+
+    /* Style the preview mode */
+    .editor-preview {
+        background: var(--notion-white);
+        padding: 24px;
+        color: var(--notion-text);
+    }
+
+    .editor-preview h1,
+    .editor-preview h2,
+    .editor-preview h3 {
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+    }
+
+    .editor-preview p {
+        margin: 0.8em 0;
+    }
+
+    .editor-preview ul,
+    .editor-preview ol {
+        padding-left: 1.5em;
+    }
+
+    .clear-button {
+        background-color: #95a5a6;  /* Subtle gray */
+        color: white;
+        border: none;
+        grid-column: 1 / -1;  /* Make it full width */
+    }
+
+    .clear-button:hover:not(:disabled) {
+        background-color: #7f8c8d;
+    }
+
+    /* Loading spinner styles */
+    .spinner {
+        display: none;
+        width: 24px;
+        height: 24px;
+        border: 3px solid var(--notion-gray);
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: spin 1s linear infinite;
+        margin: 20px auto;
+    }
+
+    .button.loading {
+        opacity: 0.7;
+        cursor: not-allowed;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
   </style>
 </head>
 <body>
@@ -271,6 +352,7 @@
                 <input type="file" id="fileLoader" accept=".md">
                 <button class="button select-all-button" id="selectAllButton">Select All</button>
                 <button class="button save-button" id="saveButton" disabled>Save File</button>
+                <button class="button clear-button" id="clearButton">Clear All</button>
             </div>
         </div>
     </div>
@@ -279,13 +361,17 @@
         <div class="controls-section">
             <h2>Transform Text</h2>
             <div class="transform-controls">
-                <button class="button style-guide-button" id="styleGuideButton">Apply Style Guide</button>
+                <button class="button style-guide-button" id="styleGuideButton">
+                    Apply Style Guide
+                </button>
                 <div class="custom-transform-divider">
                     <span>or use custom instruction</span>
                 </div>
                 <label for="instructionInput">Custom Instruction:</label>
                 <input type="text" id="instructionInput" placeholder="e.g. 'Expand bullet points'">
-                <button class="button" id="transformButton">Transform Selected Text</button>
+                <button class="button" id="transformButton">
+                    Transform Selected Text
+                </button>
             </div>
         </div>
     </div>
@@ -299,14 +385,24 @@
             </div>
         </div>
         <div id="result"></div>
+        <div class="spinner" id="resultSpinner"></div>
     </div>
   </div>
 
   <div class="main-content">
-    <textarea id="inputText" placeholder="Type or paste your text here..."></textarea>
+    <textarea id="inputText"></textarea>
   </div>
 
   <script>
+    // Initialize SimpleMDE
+    const simplemde = new SimpleMDE({
+        element: document.getElementById("inputText"),
+        spellChecker: false,
+        status: false,
+        toolbar: ["preview"],
+        placeholder: "Type or paste your markdown here...",
+    });
+
     // Obtain references to HTML elements
     const textarea = document.getElementById('inputText');
     const instructionInput = document.getElementById('instructionInput');
@@ -318,72 +414,48 @@
     const rejectButton = document.getElementById('rejectButton');
     const saveButton = document.getElementById('saveButton');
     const selectAllButton = document.getElementById('selectAllButton');
+    const clearButton = document.getElementById('clearButton');
     let currentFileName = '';  // Store the current file name
 
-    // Listen for changes on the file input element to load a .md file's content
+    // Add reference to spinner
+    const resultSpinner = document.getElementById('resultSpinner');
+
+    // Function to set loading state
+    function setLoadingState(button, isLoading) {
+        if (isLoading) {
+            button.classList.add('loading');
+            button.disabled = true;
+            resultSpinner.style.display = 'block';
+        } else {
+            button.classList.remove('loading');
+            button.disabled = false;
+            resultSpinner.style.display = 'none';
+        }
+    }
+
+    // Update the file loader to work with SimpleMDE
     fileLoader.addEventListener('change', (event) => {
-      const file = event.target.files[0];
+        const file = event.target.files[0];
+        if (!file) return;
 
-      if (!file) {
-        return;
-      }
+        if (!file.name.endsWith('.md')) {
+            alert('Please select a Markdown (.md) file.');
+            return;
+        }
 
-      if (!file.name.endsWith('.md')) {
-        alert('Please select a Markdown (.md) file.');
-        return;
-      }
+        currentFileName = file.name;
+        saveButton.disabled = false;
 
-      // Store the current file name
-      currentFileName = file.name;
-      // Enable save button when a file is loaded
-      saveButton.disabled = false;
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        textarea.value = e.target.result;
-        updateButtonStates();
-      };
-      reader.onerror = (e) => {
-        console.error("Error reading file", e);
-        alert('Error reading file.');
-      };
-      reader.readAsText(file);
-    });
-
-    // Add listener for textarea changes
-    textarea.addEventListener('input', () => {
-      updateButtonStates();
-    });
-
-    // Add save functionality
-    saveButton.addEventListener('click', () => {
-      const content = textarea.value;
-      if (!content) {
-        alert('No content to save');
-        return;
-      }
-
-      // Create blob with the content
-      const blob = new Blob([content], { type: 'text/markdown' });
-      const url = window.URL.createObjectURL(blob);
-      
-      // Create download link
-      const downloadLink = document.createElement('a');
-      downloadLink.href = url;
-      
-      // Set the file name
-      const fileName = currentFileName || 'document.md';
-      downloadLink.download = fileName.replace('.md', '_edited.md');
-      
-      // Trigger download
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      
-      // Cleanup
-      document.body.removeChild(downloadLink);
-      window.URL.revokeObjectURL(url);
-      
-      resultDiv.textContent = `File saved as ${downloadLink.download}`;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            simplemde.value(e.target.result);
+            updateButtonStates();
+        };
+        reader.onerror = (e) => {
+            console.error("Error reading file", e);
+            alert('Error reading file.');
+        };
+        reader.readAsText(file);
     });
 
     // Store original text for potential reversion
@@ -403,72 +475,83 @@
       return chars.join('');
     }
 
-    // Function to handle text transformation
+    // Update the transformText function
     async function transformText(instruction, useStyleGuide = false) {
-      const { selectionStart, selectionEnd, value } = textarea;
-      if (selectionStart === selectionEnd) {
-        alert('Please select some text in the textarea first.');
-        return;
-      }
+        const button = useStyleGuide ? styleGuideButton : transformButton;
+        setLoadingState(button, true);
 
-      // Store original text and positions for potential reversion
-      originalText = value.substring(selectionStart, selectionEnd);
-      originalStart = selectionStart;
-      originalEnd = selectionEnd;
-      
-      const selectedText = originalText;
-      const payload = {
-        text: selectedText,
-        instruction: instruction,
-        use_style_guide: useStyleGuide
-      };
+        try {
+            const cm = simplemde.codemirror;
+            if (!cm.somethingSelected()) {
+                alert('Please select some text in the editor first.');
+                setLoadingState(button, false);
+                return;
+            }
 
-      try {
-        const response = await fetch('/transform', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        
-        const data = await response.json();
-        if (data.error) {
-          resultDiv.textContent = `Error: ${data.error}`;
-          return;
+            const selectedText = cm.getSelection();
+            originalText = selectedText;
+            const selections = cm.listSelections();
+            
+            // Store the selection range
+            const from = selections[0].from();
+            const to = selections[0].to();
+            originalStart = cm.indexFromPos(from);
+            originalEnd = cm.indexFromPos(to);
+
+            const payload = {
+                text: selectedText,
+                instruction: instruction,
+                use_style_guide: useStyleGuide
+            };
+
+            try {
+                const response = await fetch('/transform', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                if (data.error) {
+                    resultDiv.textContent = `Error: ${data.error}`;
+                    return;
+                }
+
+                // Create a temporary div to handle HTML content
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = highlightChanges(data.edited_text, data.diff_indices, 0);
+                
+                // Replace the selected text with the new text using the stored range
+                cm.replaceRange(tempDiv.textContent, from, to);
+                
+                // Show edit controls and enable accept/reject buttons
+                editControls.style.display = 'block';
+                updateButtonStates();
+
+                // Show transformation details
+                let resultText = 'Transformation applied successfully:\n\n';
+                if (data.explanation) {
+                    resultText += `Changes made: ${data.explanation}\n\n`;
+                }
+                if (data.style_changes?.length > 0) {
+                    resultText += 'Style changes applied:\n';
+                    data.style_changes.forEach(change => {
+                        resultText += `• ${change}\n`;
+                    });
+                }
+                resultDiv.textContent = resultText;
+
+            } catch (err) {
+                console.error(err);
+                resultDiv.textContent = 'An error occurred. See console for details.';
+            } finally {
+                setLoadingState(button, false);
+            }
+        } catch (err) {
+            console.error(err);
+            resultDiv.textContent = 'An error occurred. See console for details.';
+            setLoadingState(button, false);
         }
-
-        // Create a temporary div to handle HTML content
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = highlightChanges(data.edited_text, data.diff_indices, 0);
-        
-        // Replace the selected text with highlighted version
-        const before = value.substring(0, selectionStart);
-        const after = value.substring(selectionEnd);
-        textarea.value = before + tempDiv.textContent + after;
-        
-        // Show edit controls and enable accept/reject buttons
-        editControls.style.display = 'block';
-        updateButtonStates();
-
-        // Show transformation details
-        let resultText = 'Transformation applied successfully:\n\n';
-        if (data.explanation) {
-          resultText += `Changes made: ${data.explanation}\n\n`;
-        }
-        if (data.style_changes?.length > 0) {
-          resultText += 'Style changes applied:\n';
-          data.style_changes.forEach(change => {
-            resultText += `• ${change}\n`;  // Use bullet point character
-          });
-        }
-        resultDiv.textContent = resultText;
-
-        // Enable save button after successful transformation
-        saveButton.disabled = false;
-
-      } catch (err) {
-        console.error(err);
-        resultDiv.textContent = 'An error occurred. See console for details.';
-      }
     }
 
     // Listen for custom transformation button clicks
@@ -519,26 +602,54 @@
       resultDiv.textContent = 'Changes rejected.';
     });
 
-    // Add select all functionality
+    // Update select all functionality
     selectAllButton.addEventListener('click', () => {
-        textarea.select();
-        textarea.focus();
+        simplemde.codemirror.execCommand('selectAll');
     });
 
-    // Function to update button states
+    // Update button states
     function updateButtonStates() {
-        // Save button state
-        const hasText = textarea.value.trim().length > 0;
+        const hasText = simplemde.value().trim().length > 0;
         saveButton.disabled = !hasText;
-
-        // Edit controls state
+        
         const hasChanges = editControls.style.display === 'block';
         acceptButton.disabled = !hasChanges;
         rejectButton.disabled = !hasChanges;
     }
 
-    // Initial button state update
-    updateButtonStates();
+    // Listen for editor changes
+    simplemde.codemirror.on('change', updateButtonStates);
+
+    // Add clear functionality
+    clearButton.addEventListener('click', () => {
+        if (confirm('Are you sure you want to clear everything? This cannot be undone.')) {
+            // Clear the editor
+            simplemde.value('');
+            
+            // Reset file input
+            fileLoader.value = '';
+            
+            // Clear filename
+            currentFileName = '';
+            
+            // Clear custom instruction
+            instructionInput.value = '';
+            
+            // Hide edit controls
+            editControls.style.display = 'none';
+            
+            // Clear result div
+            resultDiv.textContent = '';
+            
+            // Reset original text storage
+            originalText = '';
+            originalStart = 0;
+            originalEnd = 0;
+            
+            // Update button states
+            updateButtonStates();
+        }
+    });
   </script>
 
 </body>
