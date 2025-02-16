@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>GPT Text Transformer</title>
+  <title>Model Document Auto-Editor</title>
   <style>
     body {
       margin: 20px;
@@ -56,19 +56,40 @@
       color: white;
       border: none;
     }
+    
+    .file-controls {
+        margin: 10px 0;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    
+    .save-button {
+        background-color: #0056b3;
+        color: white;
+        border: none;
+    }
+    
+    .select-all-button {
+        background-color: #6c757d;  /* Gray color */
+        color: white;
+        border: none;
+    }
   </style>
 </head>
 <body>
-  <h1>GPT Text Transformer</h1>
+  <h1>Model Document Auto-Editor</h1>
 
   <p>Paste or type text below, or load a Markdown file (.md) to transform:</p>
   
   <textarea id="inputText" placeholder="Type or paste your text here..."></textarea>
   
-  <p>
+  <div class="file-controls">
     <label for="fileLoader">Load Markdown File:</label>
     <input type="file" id="fileLoader" accept=".md">
-  </p>
+    <button class="button select-all-button" id="selectAllButton">Select All</button>
+    <button class="button save-button" id="saveButton" disabled>Save File</button>
+  </div>
   
   <br/>
   <div class="controls">
@@ -99,39 +120,74 @@
     const editControls = document.getElementById('editControls');
     const acceptButton = document.getElementById('acceptButton');
     const rejectButton = document.getElementById('rejectButton');
+    const saveButton = document.getElementById('saveButton');
+    const selectAllButton = document.getElementById('selectAllButton');
+    let currentFileName = '';  // Store the current file name
 
     // Listen for changes on the file input element to load a .md file's content
     fileLoader.addEventListener('change', (event) => {
       const file = event.target.files[0];
 
-      // Guard clause: Ensure a file is selected
       if (!file) {
         return;
       }
 
-      // (Optional) Validate that the selected file has a .md extension
       if (!file.name.endsWith('.md')) {
         alert('Please select a Markdown (.md) file.');
         return;
       }
 
-      // Create a FileReader instance to read the chosen file
-      const reader = new FileReader();
+      // Store the current file name
+      currentFileName = file.name;
+      // Enable save button when a file is loaded
+      saveButton.disabled = false;
 
-      // Define what happens once the file is read successfully
+      const reader = new FileReader();
       reader.onload = (e) => {
-        // Set the file's text content into the textarea
         textarea.value = e.target.result;
       };
-
-      // Error handling: Log error and alert user if reading fails
       reader.onerror = (e) => {
         console.error("Error reading file", e);
         alert('Error reading file.');
       };
-
-      // Read the file as plain text
       reader.readAsText(file);
+    });
+
+    // Add listener for textarea changes
+    textarea.addEventListener('input', () => {
+      // Enable save button when text is present
+      saveButton.disabled = textarea.value.trim().length === 0;
+    });
+
+    // Add save functionality
+    saveButton.addEventListener('click', () => {
+      const content = textarea.value;
+      if (!content) {
+        alert('No content to save');
+        return;
+      }
+
+      // Create blob with the content
+      const blob = new Blob([content], { type: 'text/markdown' });
+      const url = window.URL.createObjectURL(blob);
+      
+      // Create download link
+      const downloadLink = document.createElement('a');
+      downloadLink.href = url;
+      
+      // Set the file name
+      const fileName = currentFileName || 'document.md';
+      downloadLink.download = fileName.replace('.md', '_edited.md');
+      
+      // Trigger download
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      
+      // Cleanup
+      document.body.removeChild(downloadLink);
+      window.URL.revokeObjectURL(url);
+      
+      resultDiv.textContent = `File saved as ${downloadLink.download}`;
     });
 
     // Store original text for potential reversion
@@ -209,6 +265,9 @@
         }
         resultDiv.textContent = resultText;
 
+        // Enable save button after successful transformation
+        saveButton.disabled = false;
+
       } catch (err) {
         console.error(err);
         resultDiv.textContent = 'An error occurred. See console for details.';
@@ -259,6 +318,12 @@
       
       editControls.style.display = 'none';
       resultDiv.textContent = 'Changes rejected.';
+    });
+
+    // Add select all functionality
+    selectAllButton.addEventListener('click', () => {
+        textarea.select();
+        textarea.focus();
     });
   </script>
 
